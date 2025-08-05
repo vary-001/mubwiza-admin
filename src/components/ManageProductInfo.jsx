@@ -4,13 +4,13 @@ import { db } from '../firebase';
 import { collection, onSnapshot, doc, deleteDoc, query, orderBy } from 'firebase/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faEdit, faTrash, faSpinner, faPlus, faSeedling } from '@fortawesome/free-solid-svg-icons';
-import ProductInfoForm from './ProductInfoForm'; // We'll create this next
+import ProductInfoForm from './ProductInfoForm'; // Uses the new simplified form
 
 export default function ManageProductInfo() {
   const [infos, setInfos] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFormVisible, setIsFormVisible] = useState(false);
-  const [editingInfo, setEditingInfo] = useState(null); // State to hold the item being edited
+  const [editingInfo, setEditingInfo] = useState(null);
 
   useEffect(() => {
     const infoQuery = query(collection(db, 'productInfo'), orderBy('createdAt', 'desc'));
@@ -34,7 +34,7 @@ export default function ManageProductInfo() {
   };
 
   const handleAddNew = () => {
-    setEditingInfo(null); // Ensure we're not editing
+    setEditingInfo(null);
     setIsFormVisible(true);
   };
   
@@ -47,7 +47,6 @@ export default function ManageProductInfo() {
     return <div className="flex justify-center items-center h-64"><FontAwesomeIcon icon={faSpinner} className="animate-spin text-orange text-5xl" /></div>;
   }
   
-  // If the form is visible, render the form component instead of the list
   if (isFormVisible) {
     return <ProductInfoForm infoToEdit={editingInfo} onComplete={handleFormComplete} />;
   }
@@ -68,13 +67,13 @@ export default function ManageProductInfo() {
           <p className="text-charcoal mt-2">Click "Add New" to create your first flower info card.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        // --- Display cards are now simpler ---
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {infos.map(info => (
             <div key={info.id} className="bg-ivory-white/50 rounded-lg shadow-md overflow-hidden flex flex-col">
               <img src={info.image} alt={info.name} className="w-full h-40 object-cover" />
               <div className="p-4 flex-grow flex flex-col">
                 <h3 className="text-lg font-bold text-mahogany">{info.name}</h3>
-                <p className="text-sm text-amber font-medium">{info.botanical}</p>
                 <div className="flex-grow"></div>
                 <div className="flex justify-end gap-2 mt-4">
                    <button onClick={() => handleEdit(info)} className="text-teak hover:text-amber p-2 transition-colors"><FontAwesomeIcon icon={faEdit} size="lg"/></button>

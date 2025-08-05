@@ -1,9 +1,9 @@
 // src/components/ManageBanner.jsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { db } from '../firebase';
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBullhorn, faSpinner, faCheckCircle, faTimesCircle, faSave, faEdit, faTrash, faLink, faEye } from '@fortawesome/free-solid-svg-icons';
+import { faSpinner, faCheckCircle, faTimesCircle, faTrash, faLink, faEye, faSave } from '@fortawesome/free-solid-svg-icons';
 
 // A reusable, modern toggle switch component
 const ToggleSwitch = ({ enabled, onChange }) => (
@@ -24,71 +24,86 @@ const ToggleSwitch = ({ enabled, onChange }) => (
 
 
 export default function ManageBanner() {
-  const [bannerData, setBannerData] = useState({ title: '', message: '', isEnabled: false, link: '' });
+  // Local state for the form, updates instantly for a responsive UI
   const [formData, setFormData] = useState({ title: '', message: '', isEnabled: false, link: '' });
   const [isLoading, setIsLoading] = useState(true);
-  const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [statusText, setStatusText] = useState('');
 
-  const bannerDocRef = doc(db, 'siteConfiguration', 'mainBanner');
+  // useRef to hold the document reference and debounce timer
+  const bannerDocRef = useRef(doc(db, 'siteConfiguration', 'mainBanner'));
+  const debounceTimer = useRef(null);
 
+  // Effect to subscribe to Firestore changes
   useEffect(() => {
     setIsLoading(true);
-    const unsubscribe = onSnapshot(bannerDocRef, (doc) => {
+    const unsubscribe = onSnapshot(bannerDocRef.current, (doc) => {
       if (doc.exists()) {
-        const data = doc.data();
-        setBannerData(data);
-        setFormData(data);
+        setFormData(doc.data());
       } else {
-        setIsEditing(true); // If no banner exists, go directly to edit mode
+        // If no banner exists, initialize with empty state
+        setFormData({ title: '', message: '', isEnabled: false, link: '' });
       }
       setIsLoading(false);
     });
+    // Cleanup subscription on component unmount
     return () => unsubscribe();
-  }, [bannerDocRef]);
+  }, []); // Empty dependency array ensures this runs only once
 
-  const handleSave = async (e) => {
-    e.preventDefault();
+  // Debounced save function using useCallback for performance
+  const debouncedSave = useCallback((data) => {
+    // Clear any existing timer
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
     setIsSaving(true);
-    try {
-      await setDoc(bannerDocRef, { ...formData, updatedAt: serverTimestamp() });
-      setIsEditing(false);
-    } catch (error) {
-      console.error("Error saving banner:", error);
-      alert("Failed to save banner. Please try again.");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-  
-  const handleClearBanner = async () => {
-    if (window.confirm("Are you sure you want to clear and disable the banner?")) {
-      setIsSaving(true);
-      try {
-        const clearedData = { title: '', message: '', isEnabled: false, link: '', updatedAt: serverTimestamp() };
-        await setDoc(bannerDocRef, clearedData);
-        setFormData(clearedData); // Also clear the form state
-        setIsEditing(false);
-      } catch(error) {
-        console.error("Error clearing banner:", error);
-      } finally {
-        setIsSaving(false);
-      }
-    }
-  }
+    setStatusText('Saving...');
 
+    // Set a new timer
+    debounceTimer.current = setTimeout(async () => {
+      try {
+        await setDoc(bannerDocRef.current, { ...data, updatedAt: serverTimestamp() });
+        setStatusText('Saved!');
+      } catch (error) {
+        console.error("Error saving banner:", error);
+        setStatusText('Error!');
+        alert("Failed to save banner. Please try again.");
+      } finally {
+        // Clear the saving status after a short delay
+        setTimeout(() => {
+          setIsSaving(false);
+          setStatusText('');
+        }, 1500);
+      }
+    }, 1000); // 1-second debounce delay
+  }, []);
+
+  // Handle changes for text inputs
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    // Update local form state immediately for smooth typing
+    const updatedData = { ...formData, [name]: value };
+    setFormData(updatedData);
+    // Debounce the save operation
+    debouncedSave(updatedData);
   };
 
-  const handleToggleChange = (value) => {
-    setFormData(prev => ({ ...prev, isEnabled: value }));
+  // Handle changes for the toggle switch
+  const handleToggleChange = (isEnabled) => {
+    const updatedData = { ...formData, isEnabled };
+    setFormData(updatedData);
+    // Save immediately since it's a single click event
+    debouncedSave(updatedData);
   };
 
-  if (isLoading) {
-    return <div className="flex justify-center items-center h-64"><FontAwesomeIcon icon={faSpinner} className="animate-spin text-orange text-5xl" /></div>;
-  }
+  // Function to clear the banner
+  const handleClearBanner = async () => {
+    if (window.confirm("Are you sure you want to clear and disable the banner?")) {
+      const clearedData = { title: '', message: '', isEnabled: false, link: '' };
+      setFormData(clearedData);
+      debouncedSave(clearedData);
+    }
+  };
   
   // --- BANNER PREVIEW COMPONENT ---
   const BannerPreview = ({ title, message, link, isEnabled }) => (
@@ -100,74 +115,68 @@ export default function ManageBanner() {
     </div>
   );
 
-  return (
-    <div className="max-w-6xl mx-auto">
-      {isEditing ? (
-        // --- EDITING VIEW ---
-        <form onSubmit={handleSave}>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Left side: Form inputs */}
-            <div className="bg-white p-6 md:p-8 rounded-2xl shadow-lg border border-sand/30 space-y-6">
-              <h2 className="text-2xl font-bold text-mahogany mb-4">Edit Site Banner</h2>
-              <div>
-                <label className="font-bold text-amber">Title</label>
-                <input name="title" type="text" placeholder="e.g., Summer Sale!" value={formData.title} onChange={handleInputChange} className="w-full mt-2 p-3 rounded-lg border border-sand focus:outline-none focus:ring-2 focus:ring-orange" />
-              </div>
-              <div>
-                <label className="font-bold text-amber">Message</label>
-                <textarea name="message" placeholder="e.g., Get 20% off all flower bouquets!" value={formData.message} onChange={handleInputChange} className="w-full mt-2 p-3 rounded-lg border border-sand focus:outline-none focus:ring-2 focus:ring-orange" rows="3"></textarea>
-              </div>
-              <div>
-                <label className="font-bold text-amber">Button Link (Optional)</label>
-                <div className="relative mt-2">
-                   <FontAwesomeIcon icon={faLink} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                   <input name="link" type="url" placeholder="https://... or /products" value={formData.link} onChange={handleInputChange} className="w-full pl-12 p-3 rounded-lg border border-sand focus:outline-none focus:ring-2 focus:ring-orange" />
-                </div>
-              </div>
-              <div className="flex items-center justify-between bg-ivory-white p-4 rounded-lg">
-                <span className="font-bold text-mahogany">Enable Banner on Site?</span>
-                <ToggleSwitch enabled={formData.isEnabled} onChange={handleToggleChange} />
-              </div>
-            </div>
-            {/* Right side: Live preview */}
-            <div className="space-y-4">
-               <h3 className="text-lg font-bold text-mahogany flex items-center"><FontAwesomeIcon icon={faEye} className="mr-3 text-amber"/>Live Preview</h3>
-               <BannerPreview {...formData} />
-                <div className="flex justify-end gap-4 pt-4">
-                  <button type="button" onClick={() => setIsEditing(false)} className="py-2 px-6 rounded-full text-charcoal font-medium hover:bg-gray-100 transition-all" disabled={isSaving}>Cancel</button>
-                  <button type="submit" className="bg-gradient-to-r from-orange to-amber text-white font-bold py-2 px-6 rounded-full flex items-center disabled:opacity-50 hover:shadow-lg hover:shadow-orange/30" disabled={isSaving}>
-                    {isSaving ? <FontAwesomeIcon icon={faSpinner} className="animate-spin mr-2" /> : <FontAwesomeIcon icon={faSave} className="mr-2" />}
-                    {isSaving ? 'Saving...' : 'Save Changes'}
-                  </button>
-                </div>
-            </div>
-          </div>
-        </form>
-      ) : (
-        // --- DISPLAY VIEW ---
-        <div className="bg-white p-6 md:p-8 rounded-2xl shadow-lg border-t-4 border-amber">
-          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-            <h2 className="text-2xl font-bold text-mahogany">Current Site Banner</h2>
-            <div className={`flex items-center font-bold text-sm py-1 px-3 rounded-full self-start ${bannerData.isEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-              <FontAwesomeIcon icon={bannerData.isEnabled ? faCheckCircle : faTimesCircle} className="mr-2" />
-              {bannerData.isEnabled ? 'Live on Site' : 'Disabled'}
-            </div>
-          </div>
-          
-          <div className="mt-6">
-            <BannerPreview {...bannerData} />
-          </div>
+  if (isLoading) {
+    return <div className="flex justify-center items-center h-64"><FontAwesomeIcon icon={faSpinner} className="animate-spin text-orange text-5xl" /></div>;
+  }
 
-          <div className="flex flex-col sm:flex-row justify-end gap-4 mt-8">
+  return (
+    <div className="max-w-6xl mx-auto p-4 font-poppins">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        
+        {/* Left side: Form inputs */}
+        <div className="bg-white p-6 md:p-8 rounded-2xl shadow-lg border border-sand/30 space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+            <h2 className="text-2xl font-bold text-mahogany">Manage Site Banner</h2>
+            <div className={`flex items-center font-bold text-sm py-1 px-3 rounded-full self-start ${formData.isEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+              <FontAwesomeIcon icon={formData.isEnabled ? faCheckCircle : faTimesCircle} className="mr-2" />
+              {formData.isEnabled ? 'Live on Site' : 'Disabled'}
+            </div>
+          </div>
+          <div>
+            <label className="font-bold text-amber">Title</label>
+            <input name="title" type="text" placeholder="e.g., Summer Sale!" value={formData.title} onChange={handleInputChange} className="w-full mt-2 p-3 rounded-lg border border-sand focus:outline-none focus:ring-2 focus:ring-orange" />
+          </div>
+          <div>
+            <label className="font-bold text-amber">Message</label>
+            <textarea name="message" placeholder="e.g., Get 20% off all flower bouquets!" value={formData.message} onChange={handleInputChange} className="w-full mt-2 p-3 rounded-lg border border-sand focus:outline-none focus:ring-2 focus:ring-orange" rows="3"></textarea>
+          </div>
+          <div>
+            <label className="font-bold text-amber">Button Link (Optional)</label>
+            <div className="relative mt-2">
+               <FontAwesomeIcon icon={faLink} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+               <input name="link" type="url" placeholder="https://... or /products" value={formData.link} onChange={handleInputChange} className="w-full pl-12 p-3 rounded-lg border border-sand focus:outline-none focus:ring-2 focus:ring-orange" />
+            </div>
+          </div>
+          <div className="flex items-center justify-between bg-ivory-white p-4 rounded-lg">
+            <span className="font-bold text-mahogany">Enable Banner on Site?</span>
+            <ToggleSwitch enabled={formData.isEnabled} onChange={handleToggleChange} />
+          </div>
+          <div className="flex justify-end pt-4">
             <button onClick={handleClearBanner} className="border-2 border-red-400 text-red-500 hover:bg-red-500 hover:text-white font-medium py-2 px-5 rounded-full transition-all flex items-center justify-center">
                 <FontAwesomeIcon icon={faTrash} className="mr-2" /> Clear Banner
             </button>
-            <button onClick={() => setIsEditing(true)} className="bg-gradient-to-r from-orange to-amber text-white font-bold py-2 px-5 rounded-full flex items-center justify-center hover:shadow-lg hover:shadow-orange/30">
-                <FontAwesomeIcon icon={faEdit} className="mr-2" /> Edit Banner
-            </button>
           </div>
         </div>
-      )}
+
+        {/* Right side: Live preview and status */}
+        <div className="space-y-4">
+           <div className="flex justify-between items-center">
+            <h3 className="text-lg font-bold text-mahogany flex items-center"><FontAwesomeIcon icon={faEye} className="mr-3 text-amber"/>Live Preview</h3>
+            {/* Saving Status Indicator */}
+            <div className={`transition-opacity duration-300 ${isSaving ? 'opacity-100' : 'opacity-0'}`}>
+                <div className="flex items-center text-charcoal text-sm font-medium">
+                    {statusText === 'Saved!' ? 
+                      <FontAwesomeIcon icon={faCheckCircle} className="mr-2 text-green-500" /> :
+                      <FontAwesomeIcon icon={faSpinner} className="animate-spin mr-2" />
+                    }
+                    <span>{statusText}</span>
+                </div>
+            </div>
+           </div>
+           <BannerPreview {...formData} />
+        </div>
+
+      </div>
     </div>
   );
 }
