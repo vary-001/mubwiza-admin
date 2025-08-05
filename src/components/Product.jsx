@@ -4,7 +4,7 @@ import { db } from '../firebase';
 import { collection, onSnapshot, doc, deleteDoc, query, orderBy } from 'firebase/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faEdit, faTrash, faSpinner, faBoxOpen } from '@fortawesome/free-solid-svg-icons';
-import EditProduct from './EditProduct';
+import EditProduct from './Editproduct';
 
 export default function Products() {
   const [products, setProducts] = useState([]);
